@@ -252,7 +252,7 @@ class TuClient:
         """Get a web-service token the way the Moodle app does: with the browser session,
         launch.php redirects to moodlemobile://token=<base64 "md5(wwwroot+passport):::token">.
         TUWEL reuses the token it already issued for the app; the user can revoke it under
-        Einstellungen > Sicherheitsschlüssel."""
+        Preferences > Security keys."""
         passport = secrets.token_hex(8)
         for attempt in (1, 2):
             r = await self.http.get(f"{TUWEL}/admin/tool/mobile/launch.php", params={

@@ -33,7 +33,7 @@ SECTIONS = _plain_names([
         {"id": 5, "modname": "resource", "name": "Skript alt",
          "url": f"{T}/mod/resource/view.php?id=5",
          "contents": [_file(50, "mod_resource", "skript.pdf")]},
-        {"id": 6, "modname": "assign", "name": "Abgabe", "url": f"{T}/mod/assign/view.php?id=6",
+        {"id": 6, "modname": "assign", "name": "Submission", "url": f"{T}/mod/assign/view.php?id=6",
          "uservisible": False, "availabilityinfo": "<b>Ab 1. Dezember</b>",
          "dates": [{"label": "Fällig:", "timestamp": 1_800_000_000}]},
     ]},

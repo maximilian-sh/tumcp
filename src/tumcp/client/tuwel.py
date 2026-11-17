@@ -327,7 +327,7 @@ def sync_plan(sections: list[dict]) -> list[dict]:
         plan.append({"path": rel, "url": f["url"], "size": f.get("size"),
                      "modified": f.get("modified")})
 
-    dirs = [f"{i:02d} {sec.get('name') or 'Abschnitt'}" for i, sec in enumerate(sections)]
+    dirs = [f"{i:02d} {sec.get('name') or 'Section'}" for i, sec in enumerate(sections)]
     for sdir, sec in zip(dirs, sections, strict=True):
         for m in sec.get("modules") or []:
             found, own = module_files(m), [sdir, m.get("name")]

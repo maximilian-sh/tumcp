@@ -31,7 +31,7 @@ def _ask(prompt: str, default: str = "") -> str:
 
 def _yes(prompt: str, default: bool) -> bool:
     answer = _ask(f"{prompt} [{'Y/n' if default else 'y/N'}] ").lower()
-    return default if not answer else answer.startswith(("y", "j"))
+    return default if not answer else answer.startswith("y")
 
 
 def _login() -> int:
@@ -81,7 +81,7 @@ def _logout() -> int:
     credentials.delete()
     shutil.rmtree(data_dir(), ignore_errors=True)
     print("Credentials, app token and session removed. To revoke the TUWEL app token too: "
-          "TUWEL > Einstellungen > Sicherheitsschlüssel.")
+          "TUWEL > Preferences > Security keys.")
     return 0
 
 

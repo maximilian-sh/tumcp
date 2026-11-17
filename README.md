@@ -20,12 +20,6 @@ to run on a server. Your password never leaves your machine except to log in at 
 > **Status: early.** It works and is used daily, but it is young. Used on macOS; the tests
 > also run on Linux and Windows, but nobody has used it there yet. Reports welcome.
 
-**Kurz auf Deutsch:** tumcp gibt deinem KI-Assistenten Lesezugriff auf TUWEL und TISS
-(Abgaben, Termine, Noten, Nachrichten, Kursunterlagen herunterladen). Es läuft lokal auf deinem
-Rechner, die Zugangsdaten liegen im Schlüsselbund deines Betriebssystems. Installation: die zwei
-Befehle unter *Quick start*, `tumcp setup` führt durch den Rest. Es kann nichts abgeben, anmelden
-oder posten.
-
 ## What it can do
 
 - **Deadlines and to-dos:** what is due in TUWEL, whether it is already submitted, quiz
@@ -91,7 +85,7 @@ tumcp update            # runs `uv tool upgrade tumcp`
 ```
 
 Then restart your MCP clients. `tumcp --version` shows the installed version. A specific
-release installs with `uv tool install git+https://github.com/maximilian-sh/tumcp@v0.1.1`.
+release installs with `uv tool install git+https://github.com/maximilian-sh/tumcp@v0.1.2`.
 
 ## Tools
 
@@ -120,10 +114,10 @@ All tools only **read** from TU Wien. Times are Europe/Vienna.
 `tuwel_sync_course` keeps a local copy of a course:
 
 ```
-~/Downloads/TUWEL/194.023 Programmierparadigmen 2026W/
-├── 01 Vorlesungen/Vorlesungsfolien/pp26v01.pdf …
-├── 02 Übungsaufgaben/Programmieraufgaben/aufgabe1.pdf …
-└── 03 Unterlagen/paradigmen.pdf
+~/Downloads/TUWEL/194.024 Verteilte Systeme 2026W/
+├── 04 05.10.2026 - Introduction and Architectures/lecture_1.pdf
+├── 05 12.10.2026 - Processes and Communication I/lecture_2.pdf …
+└── 18 Assignment 1/dslab-blocking-examples-main.zip …
 ```
 
 Running it again downloads only new or changed files. A file you changed locally (for example
@@ -176,8 +170,8 @@ URL can't use it, and that is on purpose (see below).
 | A tool returns empty results after a TU update | TISS/TUWEL changed their pages. Please open an issue with the tool name and error, but no screenshots or page dumps with personal data. |
 
 To remove tumcp completely: `tumcp logout`, `uv tool uninstall tumcp`, remove the `tu` entry
-from your MCP clients, and if you like revoke the app token in TUWEL under *Einstellungen >
-Sicherheitsschlüssel*.
+from your MCP clients, and if you like revoke the app token in TUWEL under *Preferences >
+Security keys*.
 
 ## Security and privacy
 
@@ -196,7 +190,7 @@ Sicherheitsschlüssel*.
 - **TUWEL app token.** Course contents and files come from TUWEL's web service, the one the
   official Moodle app uses. On first use tumcp gets the app token exactly like the app does
   (your logged-in session opens TUWEL's app launch page) and keeps it in the keychain. TUWEL
-  lists it under *Einstellungen > Sicherheitsschlüssel*, where you can revoke it. tumcp calls
+  lists it under *Preferences > Security keys*, where you can revoke it. tumcp calls
   only an explicit list of read functions with it, and sends it in the request body, never in a
   URL.
 - **Read-only towards TU Wien.** No tool submits, registers, posts or changes anything there.
