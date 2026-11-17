@@ -6,6 +6,7 @@ TU Wien accounts: **TUWEL** (Moodle) and **TISS**. Ask things like
 - "What is due this week, and have I already submitted it?"
 - "Any new TISS messages or TUWEL notifications?"
 - "When is the exam for 194.023 and when does registration open?"
+- "Which courses about security are offered next semester?"
 - "Download all slides of Verteilte Systeme." / "What's new in my courses since last week?"
 
 tumcp runs on your own computer: your MCP client (Claude Code, Claude Desktop, Codex, Cursor,
@@ -35,8 +36,9 @@ oder posten.
 - **Grades:** the grade report of a TUWEL course, the certificates (Zeugnisse) in TISS.
 - **News:** TUWEL notifications (forum posts, grading) and TISS messages (announcements, exam
   reminders).
-- **TISS course info:** dates, exams and their registration windows, course and group
-  registration, cancelled courses, your favourites with registration state.
+- **TISS course info:** search the whole course catalogue; dates, exams and their
+  registration windows, course and group registration, cancelled courses; your favourites
+  with registration state.
 - **Any TUWEL page as text,** e.g. an assignment or quiz page to check its state.
 
 It can **not** submit, register, tick, post or change anything at TU Wien; see the
@@ -89,7 +91,7 @@ tumcp update            # runs `uv tool upgrade tumcp`
 ```
 
 Then restart your MCP clients. `tumcp --version` shows the installed version. A specific
-release installs with `uv tool install git+https://github.com/maximilian-sh/tumcp@v0.1.0`.
+release installs with `uv tool install git+https://github.com/maximilian-sh/tumcp@v0.2.0`.
 
 ## Tools
 
@@ -108,6 +110,7 @@ All tools only **read** from TU Wien. Times are Europe/Vienna.
 | `tuwel_download` | saves a TUWEL file or folder into a local directory |
 | `tuwel_sync_course` | mirrors all files of a course into `<download folder>/<course>/`, one folder per section |
 | `tiss_messages` | TISS messages: course announcements, exam reminders, certificates |
+| `tiss_search` | search the whole course catalogue by title, keyword or number |
 | `tiss_favorites` | favourite courses by section, with registration state |
 | `tiss_course` | course details: dates, exams, registration windows, groups |
 | `tiss_certificates` | issued certificates with grade and date |
@@ -223,7 +226,6 @@ Ideas, roughly in order. Pull requests welcome; open an issue first for bigger o
 
 **Reading (fits the current design)**
 
-- [ ] Search the TISS course catalogue (Vorlesungsverzeichnis) by name or number
 - [ ] Study progress: curriculum, modules, ECTS done and missing (TISS)
 - [ ] Your registrations: courses, groups and exams you are registered for, with status
 - [ ] Submission state per assignment and the Kreuzerl (checkmark) you ticked, via the
@@ -252,6 +254,7 @@ or timing tricks around registration windows.
 - [x] Install from GitHub, `tumcp setup`, `tumcp update`
 - [x] Tool annotations (read-only, titles), real tool errors, parameter limits, progress
 - [x] CI on Linux, macOS and Windows
+- [x] Search the TISS course catalogue (`tiss_search`)
 - [ ] Publish on PyPI (`uvx tumcp`) and in the official MCP Registry
 - [ ] One-click bundle for Claude Desktop (`.mcpb`)
 - [ ] Typed output schemas for all tools

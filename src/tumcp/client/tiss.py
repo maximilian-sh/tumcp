@@ -157,6 +157,53 @@ def parse_favorites(html: str) -> list[dict]:
             for head, courses in sections if courses]
 
 
+# ------------------------------------------------------------------- search
+SEARCH_TITLE_RE = re.compile(r"^(?P<nr>[0-9A-Z]{3}\.[0-9A-Z]{3})\s+(?P<type>[A-Z]{2,3})\s+"
+                             r"(?P<title>.*?),\s*(?P<semester>\d{4}[WS])$")
+# the stock opening of nearly every objectives text
+OBJECTIVES_INTRO = re.compile(r"^(Nach positiver Absolvierung der Lehrveranstaltung"
+                              r"( sind Studierende in der Lage,?| können Studierende)?|After "
+                              r"successful completion of the course,? students are able to)"
+                              r"[\s:,]*", re.I)
+
+
+async def search(tu: TuClient, query: str, limit: int = 25, offset: int = 0) -> dict:
+    """Search the course catalogue (public TISS API, full text: titles and descriptions)."""
+    query = query.strip()
+    if not query:
+        raise ValueError("search for something: a course title, keyword or number like 194.023")
+    limit, offset = max(1, min(int(limit), 100)), max(0, int(offset))
+    data = await tu.tiss_api("search/course/v1.0/quickSearch", searchterm=query,
+                             count=limit, offset=offset)
+    return parse_search(data, offset, query)
+
+
+def parse_search(data: dict, offset: int = 0, query: str = "") -> dict:
+    """quickSearch results: title "194.023 VU Programmierparadigmen, 2026W" plus a
+    detail URL and the course objectives as HTML. TISS sorts by course number; courses
+    whose title contains the query move to the front of the page."""
+    courses = []
+    for r in data.get("results") or []:
+        m = SEARCH_TITLE_RE.match((r.get("title") or "").strip())
+        key = _course_key(r.get("detail_url"))
+        courses.append({
+            "nr": m["nr"] if m else (key[0] if key else None),
+            "type": m["type"] if m else None,
+            "title": m["title"] if m else r.get("title"),
+            "semester": m["semester"] if m else (key[1] if key else None),
+            "summary": dom.clip(OBJECTIVES_INTRO.sub("", dom.strip_html(r.get("short"))), 300)
+                       or None,
+            "url": r.get("detail_url"),
+        })
+    q = query.strip().lower()
+    courses.sort(key=lambda c: q not in (c["title"] or "").lower())    # stable: number order
+    total = data.get("total_results") or 0
+    out = {"total": total, "offset": offset, "courses": courses}
+    if offset + len(courses) < total:
+        out["next_offset"] = offset + len(courses)
+    return out
+
+
 # ------------------------------------------------------------------- course
 async def course(tu: TuClient, course_nr: str, semester: str | None = None) -> dict:
     """Course details: the planning-relevant sections (dates, exams, registration, groups)."""

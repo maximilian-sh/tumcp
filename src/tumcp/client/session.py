@@ -194,6 +194,19 @@ class TuClient:
                 raise TuError("TISS returned an empty client-window shell")
             return r.text
 
+    async def tiss_api(self, path: str, **params) -> dict:
+        """GET from TISS's public REST API (/api/...), which needs no login."""
+        r = await self.http.get(f"{TISS}/api/{path}", params=params,
+                                headers={"Accept": "application/json"})
+        try:
+            data = r.json()
+        except ValueError:
+            raise TuError(f"TISS API answered with HTTP {r.status_code}, not JSON") from None
+        error = isinstance(data, dict) and (data.get("error") or data.get("error_message"))
+        if error:
+            raise TuError(f"TISS API: {error.get('message') if isinstance(error, dict) else error}")
+        return data
+
     # ------------------------------------------------------------------ TUWEL
     async def _tuwel_login(self) -> None:
         await self._ensure_tiss()          # IdP session first: the TUWEL hop then needs no TOTP

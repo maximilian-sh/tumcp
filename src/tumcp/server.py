@@ -31,7 +31,8 @@ course system). Use it to check deadlines and whether something is already submi
 (tuwel_upcoming), calendar events (tuwel_calendar), course material (tuwel_course_contents;
 files to disk with tuwel_download or a whole course with tuwel_sync_course), grades
 (tuwel_grades, tiss_certificates), announcements (tiss_messages, tuwel_notifications) and
-course/exam/registration details (tiss_favorites, tiss_course). Times are Europe/Vienna.
+course/exam/registration details (tiss_favorites, tiss_course; any course: tiss_search).
+Times are Europe/Vienna.
 These tools cannot submit, register or change anything at TU Wien."""
 
 mcp = MCPServer("tu", instructions=INSTRUCTIONS, version=__version__)
@@ -199,6 +200,22 @@ async def tiss_favorites() -> list[dict]:
     """TISS favourite courses grouped by section (the '!' section is the current
     semester), with registration/group state markers per course."""
     return await _safe(tiss.favorites(client()))
+
+
+@mcp.tool(annotations=_read("Search TISS courses"))
+async def tiss_search(
+        query: Annotated[str, Field(min_length=2, description="Course title, keyword or "
+                                                              "number, e.g. 'Verteilte "
+                                                              "Systeme' or '194.024'.")],
+        limit: Annotated[int, Field(ge=1, le=100, description="Results per page.")] = 25,
+        offset: Annotated[int, Field(ge=0, description="Skip this many results; use "
+                                                       "next_offset to page.")] = 0,
+) -> dict:
+    """Search the TU Wien course catalogue (all courses, not only the user's). Full-text
+    over titles and descriptions, sorted by course number, so broad words match many
+    courses: prefer the exact title or the number. Returns number, type, title, semester
+    and objectives; details with tiss_course."""
+    return await _safe(tiss.search(client(), query, limit, offset))
 
 
 @mcp.tool(annotations=_read("TISS course details"))
