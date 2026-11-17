@@ -13,6 +13,7 @@ dependencies = [
     "filelock>=3.12",
     "platformdirs>=4.0",
     "keyring>=25.0",
+    "tzdata; sys_platform == 'win32'",     # Windows has no time zone database for zoneinfo
 ]
 
 [project.urls]
