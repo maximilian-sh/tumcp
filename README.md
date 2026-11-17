@@ -72,11 +72,16 @@ Restart your MCP client and ask it something. That's it.
 ### Where do I get the TOTP secret?
 
 tumcp logs in without a browser, so it needs the secret behind your authenticator codes, not a
-single code. The TU Wien IdP ([idp.zid.tuwien.ac.at](https://idp.zid.tuwien.ac.at)) shows it as
+single code (MFA is mandatory for the TUaccount since April 2026). The TU Wien IdP ([idp.zid.tuwien.ac.at](https://idp.zid.tuwien.ac.at)) shows it as
 a **base32 key** next to the QR code when you set up an authenticator app. If your
 authenticator is already set up and you did not note the key, set up the authenticator again in
 the IdP. Scan the new QR code into your normal authenticator app as well, so you keep a working
 second factor for yourself.
+
+The [TuAutoLogin](https://github.com/maximilian-sh/TuAutoLogin#mfa--totp-setup) README
+explains getting the key step by step. Keep the key somewhere safe (e.g. your password
+manager): the same base32 key works in tumcp, TuAutoLogin and any other tool that generates
+TU Wien codes.
 
 ## Updating
 
