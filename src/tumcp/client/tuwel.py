@@ -9,25 +9,32 @@ core_calendar_get_action_events_by_timesort (limitnum <= 50),
 core_calendar_get_calendar_monthly_view,
 core_course_get_enrolled_courses_by_timeline_classification and
 message_popup_get_popup_notifications (needs useridto). core_course_get_contents
-and gradereport_* are NOT enabled for AJAX, so course and grade pages are parsed
-from HTML.
+is NOT enabled for AJAX: course contents and files come from the web service with
+the Moodle-app token (TuClient.ws). Grade reports and single pages are parsed from
+HTML.
 """
 from __future__ import annotations
 
+import html
 import re
 import time
 from datetime import datetime
+from pathlib import Path
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
-from . import dom
-from .session import TuClient, TuError
+import httpx2
+
+from . import dom, files
+from .files import rel_path, safe_name
+from .session import TUWEL, TuClient, TuError
 
 TZ = ZoneInfo("Europe/Vienna")
 ACTION_EVENTS_MAX = 50          # Moodle rejects a larger limitnum
 GRACE = 6 * 3600                # also show what was due in the last few hours
 DAY = 86400
-# German type label Moodle appends to an activity name ("Skript Datei")
-TYPE_SUFFIX = re.compile(r"\s+(Datei|Verzeichnis|Textseite|Link/URL|Aufgabe|Test|Forum|Buch)$")
+FILE_MODULES = ("resource", "folder")
+MODULE_URL = re.compile(r"/mod/\w+/view\.php\?(?:[^#]*&)?id=(\d+)")
 
 
 def _days(days: int) -> int:
@@ -161,51 +168,83 @@ def parse_notifications(data: dict) -> dict:
     }
 
 
-# ----------------------------------------------------------- course page
+# ---------------------------------------------------------- course contents
+def _plain_names(sections: list[dict]) -> list[dict]:
+    """The web service sends names HTML-escaped ("TCP &amp; Threads")."""
+    for sec in sections:
+        sec["name"] = html.unescape(sec.get("name") or "")
+        for m in sec.get("modules") or []:
+            m["name"] = html.unescape(m.get("name") or "")
+    return sections
+
+
+async def _course(tu: TuClient, cid: int) -> tuple[str | None, list[dict]]:
+    sections = _plain_names(await tu.ws("core_course_get_contents", courseid=cid))
+    found = await tu.ws("core_course_get_courses_by_field", field="id", value=cid)
+    title = (found.get("courses") or [{}])[0].get("fullname")
+    return (html.unescape(title) if title else None, sections)
+
+
 async def course_contents(tu: TuClient, course_id: int) -> dict:
-    """Sections and activities of a course page (names, types, links, dates)."""
+    """Sections and activities of a course, with every file (size, date, link)."""
     cid = int(course_id)
-    return parse_course_contents(await tu.tuwel_get(f"/course/view.php?id={cid}"), cid)
+    title, sections = await _course(tu, cid)
+    return parse_course_contents(sections, title, cid)
 
 
-def _is_section(node) -> bool:
-    classes = (node.attributes.get("class") or "").split()
-    return node.tag == "li" and ("section" in classes or "course-section" in classes)
+def module_url(m: dict) -> str | None:
+    """Link of an activity; folders shown inline on the course page come without one."""
+    if m.get("url"):
+        return m["url"]
+    if m.get("noviewlink") or not m.get("id"):          # labels
+        return None
+    return f"{TUWEL}/mod/{m.get('modname')}/view.php?id={m['id']}"
 
 
-def _owning_section(node):
-    node = node.parent
-    while node is not None and not _is_section(node):
-        node = node.parent
-    return node
+def module_files(m: dict) -> list[dict]:
+    """Files of a resource or folder: path inside it, size, TUWEL mtime, link."""
+    if m.get("modname") not in FILE_MODULES:
+        return []
+    return [{"path": rel_path(*(c.get("filepath") or "").split("/"), c.get("filename")),
+             "size": c.get("filesize"), "modified": c.get("timemodified"),
+             "url": c.get("fileurl")}
+            for c in m.get("contents") or [] if c.get("type") == "file"]
 
 
-def parse_course_contents(html: str, course_id: int) -> dict:
-    tree = dom.parse(html)
-    title = dom.text(tree.css_first("h1"))
-    sections = []
-    for sec in dom.select(tree, "li.section, li.course-section"):
-        name = dom.text(sec.css_first(".sectionname, h3"))
-        summary = dom.text(sec.css_first(".summarytext, .summary"), 600)
-        acts = []
-        for act in sec.css("li.activity"):
-            if _owning_section(act) != sec:      # belongs to a nested subsection
-                continue
-            mod = re.search(r"modtype_(\w+)", act.attributes.get("class") or "")
-            link = act.css_first("a.aalink, .activityname a, a")
-            name_node = act.css_first(".instancename, .activityname")
-            acts.append({
-                "name": TYPE_SUFFIX.sub("", dom.text(name_node)),
-                "type": mod.group(1) if mod else None,
-                "url": link.attributes.get("href") if link else None,
-                "dates": dom.text(act.css_first(
-                    ".activity-dates, [data-region=activity-dates]"), 200) or None,
-                "info": dom.text(act.css_first(
-                    ".activity-altcontent, .contentafterlink, .description"), 400) or None,
-            })
-        if name or acts:
-            sections.append({"section": name, "summary": summary or None, "activities": acts})
-    return {"course": title, "course_id": course_id, "sections": sections}
+def _activity(m: dict) -> dict:
+    act = {"name": m.get("name"), "type": m.get("modname"), "url": module_url(m)}
+    dates = "; ".join(f"{d.get('label')} {iso(d.get('timestamp'))}"
+                      for d in m.get("dates") or [])
+    if dates:
+        act["dates"] = dates
+    info = dom.strip_html(m.get("description"), 400)
+    if info:
+        act["info"] = info
+    if not m.get("uservisible", True):
+        act["restricted"] = dom.strip_html(m.get("availabilityinfo"), 200) or True
+    found = [{"name": f["path"], "size": f["size"], "modified": iso(f["modified"]),
+              "url": f["url"]} for f in module_files(m)]
+    found += [{"name": f["name"], "url": f["url"]} for f in files.file_links(m.get("description"))]
+    if found:
+        act["files"] = found
+    if m.get("modname") == "url":
+        link = next((c.get("fileurl") for c in m.get("contents") or []), None)
+        if link:
+            act["link"] = link
+    return act
+
+
+def parse_course_contents(sections: list[dict], title: str | None, course_id: int) -> dict:
+    out = []
+    for sec in sections:
+        acts = [_activity(m) for m in sec.get("modules") or []]
+        linked = [{"name": f["name"], "url": f["url"]}
+                  for f in files.file_links(sec.get("summary"))]
+        if sec.get("name") or acts or linked:
+            out.append({"section": sec.get("name"),
+                        "summary": dom.strip_html(sec.get("summary"), 600) or None,
+                        "activities": acts, **({"files": linked} if linked else {})})
+    return {"course": title, "course_id": course_id, "sections": out}
 
 
 # ------------------------------------------------------------------- grades
@@ -250,3 +289,122 @@ def parse_page(html: str, url: str, limit: int = 6000) -> dict:
     tree = dom.parse(html)
     main = tree.css_first("#region-main, [role=main], main") or tree.body
     return {"url": url, "title": dom.text(tree.css_first("title")), "text": dom.text(main, limit)}
+
+
+# ----------------------------------------------------------------- download
+def course_folder(title: str | None, course_id: int) -> str:
+    """'194.023 Programmierparadigmen (VU 4,0) 2026W' -> '194.023 Programmierparadigmen 2026W'."""
+    return safe_name(re.sub(r"\s*\([^)]*\)", "", title or "").strip() or f"TUWEL {course_id}")
+
+
+def sync_plan(sections: list[dict]) -> list[dict]:
+    """Every file of a course once, with its place below the course folder.
+
+    Layout: "<nn> <section>/<file>"; folders and resources with several files get a
+    subfolder named after the activity. Files that are only linked in a text (labels,
+    section summaries) go next to the section's files. Module files are placed first,
+    so a label that links to a folder's file does not produce a second copy.
+    """
+    plan: list[dict] = []
+    seen: set[str] = set()
+    taken: set[str] = set()
+
+    def add(where: list, fallback: list, path: str, f: dict) -> None:
+        key = files.file_key(f["url"])
+        if key in seen:
+            return
+        seen.add(key)
+        rel = "/".join(p for p in (rel_path(*where), path) if p)
+        if rel in taken:
+            rel = "/".join(p for p in (rel_path(*fallback), path) if p)
+        base, n = rel, 2
+        while rel in taken:
+            stem, dot, ext = base.rpartition(".")
+            rel = f"{stem} ({n}).{ext}" if dot and "/" not in ext else f"{base} ({n})"
+            n += 1
+        taken.add(rel)
+        plan.append({"path": rel, "url": f["url"], "size": f.get("size"),
+                     "modified": f.get("modified")})
+
+    dirs = [f"{i:02d} {sec.get('name') or 'Abschnitt'}" for i, sec in enumerate(sections)]
+    for sdir, sec in zip(dirs, sections, strict=True):
+        for m in sec.get("modules") or []:
+            found, own = module_files(m), [sdir, m.get("name")]
+            for f in found:
+                if m.get("modname") == "folder" or len(found) > 1:
+                    add(own, own, f["path"], f)
+                else:
+                    add([sdir], own, f["path"], f)
+    for sdir, sec in zip(dirs, sections, strict=True):
+        texts = [(m.get("description"), m.get("name")) for m in sec.get("modules") or []]
+        for html, owner in [*texts, (sec.get("summary"), None)]:
+            for f in files.file_links(html):
+                add([sdir], [sdir, owner], safe_name(f["name"]), f)
+    return plan
+
+
+async def _fetch(tu: TuClient, plan: list[dict], root: Path, overwrite: bool) -> dict:
+    """Download what the plan lists into `root`, skipping what is already up to date."""
+    folder = files.Folder(root)
+    result: dict = {"folder": str(root), "new": [], "updated": [], "unchanged": 0,
+                    "kept_local_changes": [], "failed": []}
+    try:
+        for item in plan:
+            state = folder.plan(item["path"], item["size"], item["modified"], overwrite)
+            if state is None:
+                result["unchanged"] += 1
+                continue
+            if state == "kept":
+                result["kept_local_changes"].append(item["path"])
+                continue
+            if (item["size"] or 0) > files.MAX_BYTES:
+                result["failed"].append(f"{item['path']}: larger than "
+                                        f"{files.MAX_BYTES // 2**20} MB")
+                continue
+            try:
+                await tu.download(item["url"], root / item["path"], files.MAX_BYTES)
+            except (TuError, httpx2.HTTPError, OSError) as exc:
+                result["failed"].append(f"{item['path']}: {exc}")
+                continue
+            folder.record(item["path"], item["modified"])
+            result[state].append(item["path"])
+    finally:
+        folder.save()
+    return {k: v for k, v in result.items() if v or k in ("folder", "unchanged")}
+
+
+async def sync_course(tu: TuClient, course_id: int, dest: str, overwrite: bool = False) -> dict:
+    """Mirror every file of a course into `dest`/<course>/. Only new or changed files are
+    downloaded; files changed locally are kept unless `overwrite` is set."""
+    cid = int(course_id)
+    title, sections = await _course(tu, cid)
+    root = Path(dest).expanduser() / course_folder(title, cid)
+    return {"course": title, **await _fetch(tu, sync_plan(sections), root, overwrite)}
+
+
+async def download(tu: TuClient, url: str, dest: str, overwrite: bool = False) -> dict:
+    """Save one TUWEL file, or every file of a resource or folder, into the directory `dest`.
+
+    `url` is an activity link (mod/resource, mod/folder) or a file link (pluginfile.php).
+    A folder gets its own subdirectory. Existing files are kept unless `overwrite` is set.
+    """
+    root = Path(dest).expanduser()
+    path = urlparse(url).path
+    if url.startswith(TUWEL + "/") and "/pluginfile.php/" in path:
+        item = {"path": safe_name(path.rsplit("/", 1)[-1]), "url": url, "size": None,
+                "modified": None}
+        return await _fetch(tu, [item], root, overwrite)
+    m = MODULE_URL.search(url)
+    if not url.startswith(TUWEL + "/") or not m:
+        raise TuError("pass a file, folder or pluginfile link from tuwel_course_contents")
+    cmid = int(m[1])
+    cm = (await tu.ws("core_course_get_course_module", cmid=cmid)).get("cm") or {}
+    sections = _plain_names(await tu.ws("core_course_get_contents", courseid=cm.get("course"),
+                                        options=[{"name": "cmid", "value": cmid}]))
+    mod = next((x for s in sections for x in s.get("modules") or [] if x.get("id") == cmid), {})
+    found = module_files(mod)
+    if not found:
+        raise TuError(f"{cm.get('name') or 'this activity'} has no files to download")
+    sub = safe_name(mod.get("name")) if mod.get("modname") == "folder" or len(found) > 1 else ""
+    plan = [{**f, "path": "/".join(p for p in (sub, f["path"]) if p)} for f in found]
+    return await _fetch(tu, plan, root, overwrite)

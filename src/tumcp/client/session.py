@@ -5,14 +5,21 @@ own tumcp process. They share ONE cookie jar in the user data directory, guarded
 by a file lock: before logging in, a process re-reads the jar, because another
 process may have just logged in. Every fresh login burns a single-use TOTP code,
 so avoiding duplicate logins matters.
+
+Course contents and files come from TUWEL's web service with the token of the
+Moodle app (see `_launch_token`): it lists every file with size and date, in every
+course format, which the HTML pages do not.
 """
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import http.cookiejar
 import logging
 import os
 import re
+import secrets
 import time
 from pathlib import Path
 
@@ -29,10 +36,44 @@ log = logging.getLogger(__name__)
 TUWEL = "https://tuwel.tuwien.ac.at"
 TISS = "https://tiss.tuwien.ac.at"
 UA = "tumcp (+https://github.com/maximilian-sh/tumcp)"
+WS = f"{TUWEL}/webservice/rest/server.php"
+# the only web-service functions tumcp calls: all of them just read
+WS_FUNCTIONS = frozenset({
+    "core_webservice_get_site_info",
+    "core_course_get_contents",
+    "core_course_get_courses_by_field",
+    "core_course_get_course_module",
+})
+TOKEN_ERRORS = ("invalidtoken", "accessexception")
 
 
 class TuError(RuntimeError):
     pass
+
+
+def ws_file_url(url: str) -> str:
+    """The web-service form of a TUWEL file link (the plain one needs a browser session)."""
+    if url.startswith(f"{TUWEL}/pluginfile.php/"):
+        return url.replace("/pluginfile.php/", "/webservice/pluginfile.php/", 1)
+    if url.startswith(f"{TUWEL}/webservice/pluginfile.php/"):
+        return url
+    raise TuError("not a TUWEL file link (pluginfile.php)")
+
+
+def _form(args: dict, prefix: str = "") -> dict[str, str]:
+    """Nested arguments as PHP form fields: {"options": [{"name": "x"}]} -> options[0][name]."""
+    out: dict[str, str] = {}
+    for key, value in args.items():
+        name = f"{prefix}[{key}]" if prefix else str(key)
+        if isinstance(value, dict):
+            out.update(_form(value, name))
+        elif isinstance(value, (list, tuple)):
+            out.update(_form(dict(enumerate(value)), name))
+        elif isinstance(value, bool):
+            out[name] = "1" if value else "0"
+        else:
+            out[name] = str(value)
+    return out
 
 
 def data_dir() -> Path:
@@ -58,6 +99,7 @@ class TuClient:
         self._window = ClientWindow()
         self._sesskey: str | None = None
         self._userid: int | None = None
+        self._token: str | None = None
         self._tiss_checked = 0.0
         self.http = httpx2.AsyncClient(
             follow_redirects=True, http2=False,
@@ -191,6 +233,102 @@ class TuClient:
                 r = await self.http.get(url)
             self._remember(r.text)
             return r.text
+
+    # ------------------------------------------------------------ web service
+    async def _launch_token(self) -> str:
+        """Get a web-service token the way the Moodle app does: with the browser session,
+        launch.php redirects to moodlemobile://token=<base64 "md5(wwwroot+passport):::token">.
+        TUWEL reuses the token it already issued for the app; the user can revoke it under
+        Einstellungen > Sicherheitsschlüssel."""
+        passport = secrets.token_hex(8)
+        for attempt in (1, 2):
+            r = await self.http.get(f"{TUWEL}/admin/tool/mobile/launch.php", params={
+                "service": "moodle_mobile_app", "passport": passport, "urlscheme": "moodlemobile"},
+                follow_redirects=False)
+            location = r.headers.get("location", "")
+            if location.startswith("moodlemobile://token="):
+                break
+            if attempt == 1:
+                await self._tuwel_login()
+        else:
+            raise TuError("TUWEL handed out no app token (is the Moodle app access disabled?)")
+        payload = base64.b64decode(location.split("token=", 1)[1]).decode()
+        signature, token, *_ = payload.split(":::")
+        if signature != hashlib.md5(f"{TUWEL}{passport}".encode()).hexdigest():
+            raise TuError("TUWEL app token: signature mismatch")
+        return token
+
+    async def _ws_token(self) -> str:
+        if self._token is None:
+            self._token = credentials.load_token()
+        if self._token is None:
+            self._token = await self._launch_token()
+            credentials.save_token(self._token)
+        return self._token
+
+    def _drop_token(self) -> None:
+        self._token = None
+        credentials.delete_token()
+
+    async def ws(self, function: str, **args):
+        """Call a TUWEL web-service function (one of WS_FUNCTIONS) with the app token."""
+        if function not in WS_FUNCTIONS:
+            raise TuError(f"{function} is not one of the read functions tumcp uses")
+        async with self._lock:
+            for attempt in (1, 2):
+                body = {"wstoken": await self._ws_token(), "wsfunction": function,
+                        "moodlewsrestformat": "json", **_form(args)}
+                r = await self.http.post(WS, data=body)
+                try:
+                    data = r.json()
+                except ValueError:
+                    raise TuError(f"{function}: TUWEL answered with HTTP {r.status_code}, "
+                                  "not JSON") from None
+                if not (isinstance(data, dict) and "exception" in data):
+                    return data
+                if attempt == 1 and data.get("errorcode") in TOKEN_ERRORS:
+                    self._drop_token()
+                    continue
+                raise TuError(f"{function}: {data.get('message') or data.get('errorcode')}")
+
+    async def download(self, url: str, out: Path, max_bytes: int) -> int:
+        """Stream a TUWEL file to `out` (through a .part file) and return its size.
+
+        The token goes in the POST body, so it never shows up in a URL or a log line."""
+        url = ws_file_url(url)
+        part = out.with_name(out.name + ".part")
+        async with self._lock:
+            for attempt in (1, 2):
+                body = {"token": await self._ws_token()}
+                async with self.http.stream("POST", url, data=body) as r:
+                    if "application/json" in r.headers.get("content-type", ""):
+                        await r.aread()
+                        try:
+                            err = r.json()
+                        except ValueError:
+                            err = None
+                        if isinstance(err, dict) and err.get("errorcode"):
+                            if attempt == 1 and err["errorcode"] in TOKEN_ERRORS:
+                                self._drop_token()
+                                continue
+                            raise TuError(err.get("error") or err["errorcode"])
+                    if r.status_code != 200:
+                        raise TuError(f"HTTP {r.status_code}")
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    size = 0
+                    try:
+                        with part.open("wb") as fh:
+                            async for chunk in r.aiter_bytes():
+                                size += len(chunk)
+                                if size > max_bytes:
+                                    raise TuError(f"larger than {max_bytes // 2**20} MB")
+                                fh.write(chunk)
+                    except BaseException:
+                        part.unlink(missing_ok=True)
+                        raise
+                    part.replace(out)
+                    return size
+        raise TuError("TUWEL rejected the app token twice")
 
     async def ajax(self, method: str, args: dict):
         """Call a TUWEL (Moodle) web-service function that is enabled for AJAX."""
