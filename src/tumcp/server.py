@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from typing import Annotated
+from typing import Annotated, Literal
 
 import httpx2
 from mcp.server.mcpserver import Context, MCPServer
@@ -22,14 +22,15 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from . import __version__, config
-from .client import tiss, tuwel
+from .client import lecturetube, tiss, tuwel
 from .client.auth import AuthError
 from .client.session import TuClient, TuError
 
 INSTRUCTIONS = """Read-only access to the user's TU Wien accounts (TUWEL = Moodle, TISS =
 course system). Use it to check deadlines and whether something is already submitted
 (tuwel_upcoming), calendar events (tuwel_calendar), course material (tuwel_course_contents;
-files to disk with tuwel_download or a whole course with tuwel_sync_course), grades
+files to disk with tuwel_download or a whole course with tuwel_sync_course), recorded
+lectures (tuwel_recordings, tuwel_transcript, tuwel_download_recording), grades
 (tuwel_grades, tiss_certificates), announcements (tiss_messages, tuwel_notifications) and
 course/exam/registration details (tiss_favorites, tiss_course; any course: tiss_search).
 Times are Europe/Vienna.
@@ -183,6 +184,58 @@ async def tuwel_sync_course(course_id: CourseId, dest: Dest = "", overwrite: Ove
 
     target = dest or str(config.download_dir())
     return await _safe(tuwel.sync_course(client(), course_id, target, overwrite, progress))
+
+
+RecordingUrl = Annotated[str, Field(pattern=r"^https://tuwel\.tuwien\.ac\.at/mod/opencast/",
+                                    description="A recording link (…/mod/opencast/view.php"
+                                                "?id=…&e=…) from tuwel_recordings.")]
+
+
+@mcp.tool(annotations=_read("LectureTube recordings"))
+async def tuwel_recordings(course_id: CourseId) -> dict:
+    """The LectureTube lecture recordings of one TUWEL course: each recording activity with
+    its episodes (title, date, duration, link). Read one with tuwel_transcript, save it
+    with tuwel_download_recording."""
+    return await _safe(lecturetube.recordings(client(), course_id))
+
+
+@mcp.tool(annotations=_read("Lecture transcript"))
+async def tuwel_transcript(
+        url: RecordingUrl,
+        language: Annotated[str, Field(description="Caption language like 'de' or 'en'. "
+                                                   "Empty: the first available.")] = "",
+) -> dict:
+    """The spoken text of one recorded lecture, from its captions, as paragraphs with time
+    marks ("[0:12:30] ..."). Captions are usually generated automatically
+    (`auto_generated`), so names and formulas can be misheard. A 2-hour lecture is about
+    15–20k tokens."""
+    return await _safe(lecturetube.transcript(client(), url, language))
+
+
+@mcp.tool(annotations=_save("Download a lecture recording"))
+async def tuwel_download_recording(
+        url: RecordingUrl,
+        quality: Annotated[Literal["720p", "1080p"], Field(
+            description="Video height. 720p slides: about 170 MB per lecture hour; "
+                        "1080p and the camera stream are larger.")] = "720p",
+        stream: Annotated[Literal["presentation", "presenter", "both"], Field(
+            description="'presentation' = slides with the audio, 'presenter' = camera.")]
+            = "presentation",
+        captions: Annotated[bool, Field(description="Also save the captions as .vtt.")] = True,
+        dest: Dest = "",
+        ctx: Context | None = None,
+) -> dict:
+    """Save a recorded lecture as MP4 (and its captions as .vtt) into
+    <dest>/<course>/LectureTube/. A link without `&e=` saves every recording of that
+    activity, which can be several GB. Files already there are skipped. The LectureTube
+    terms allow such copies only for personal use in the course: never share them."""
+    async def progress(done: int, total: int | None, name: str) -> None:
+        if ctx is not None:
+            await ctx.report_progress(done, total, name)
+
+    target = dest or str(config.download_dir())
+    return await _safe(lecturetube.download(client(), url, target, quality, stream, captions,
+                                            progress))
 
 
 @mcp.tool(annotations=_read("TISS messages"))

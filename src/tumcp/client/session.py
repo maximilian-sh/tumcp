@@ -21,6 +21,7 @@ import os
 import re
 import secrets
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import httpx2
@@ -35,6 +36,7 @@ log = logging.getLogger(__name__)
 
 TUWEL = "https://tuwel.tuwien.ac.at"
 TISS = "https://tiss.tuwien.ac.at"
+CDN = "https://cdn.video.tuwien.ac.at"           # LectureTube recordings and captions
 UA = "tumcp (+https://github.com/maximilian-sh/tumcp)"
 WS = f"{TUWEL}/webservice/rest/server.php"
 # the only web-service functions tumcp calls: all of them just read
@@ -58,6 +60,38 @@ def ws_file_url(url: str) -> str:
     if url.startswith(f"{TUWEL}/webservice/pluginfile.php/"):
         return url
     raise TuError("not a TUWEL file link (pluginfile.php)")
+
+
+ByteProgress = Callable[[int, int | None], Awaitable[None]]
+
+
+async def _save_stream(r: httpx2.Response, out: Path, max_bytes: int,
+                       progress: ByteProgress | None = None) -> int:
+    """Write a streamed response to `out` through a .part file; returns the size.
+    `progress(bytes_done, bytes_total)` is awaited about every 8 MB."""
+    if r.status_code != 200:
+        raise TuError(f"HTTP {r.status_code}")
+    total = int(r.headers.get("content-length") or 0) or None
+    if total and total > max_bytes:
+        raise TuError(f"larger than {max_bytes // 2**20} MB")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    part = out.with_name(out.name + ".part")
+    size, reported = 0, 0
+    try:
+        with part.open("wb") as fh:
+            async for chunk in r.aiter_bytes():
+                size += len(chunk)
+                if size > max_bytes:
+                    raise TuError(f"larger than {max_bytes // 2**20} MB")
+                fh.write(chunk)
+                if progress is not None and size - reported >= 8 * 2**20:
+                    reported = size
+                    await progress(size, total)
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
+    part.replace(out)
+    return size
 
 
 def _form(args: dict, prefix: str = "") -> dict[str, str]:
@@ -309,7 +343,6 @@ class TuClient:
 
         The token goes in the POST body, so it never shows up in a URL or a log line."""
         url = ws_file_url(url)
-        part = out.with_name(out.name + ".part")
         async with self._lock:
             for attempt in (1, 2):
                 body = {"token": await self._ws_token()}
@@ -325,23 +358,28 @@ class TuClient:
                                 self._drop_token()
                                 continue
                             raise TuError(err.get("error") or err["errorcode"])
-                    if r.status_code != 200:
-                        raise TuError(f"HTTP {r.status_code}")
-                    out.parent.mkdir(parents=True, exist_ok=True)
-                    size = 0
-                    try:
-                        with part.open("wb") as fh:
-                            async for chunk in r.aiter_bytes():
-                                size += len(chunk)
-                                if size > max_bytes:
-                                    raise TuError(f"larger than {max_bytes // 2**20} MB")
-                                fh.write(chunk)
-                    except BaseException:
-                        part.unlink(missing_ok=True)
-                        raise
-                    part.replace(out)
-                    return size
+                    return await _save_stream(r, out, max_bytes)
         raise TuError("TUWEL rejected the app token twice")
+
+    async def cdn_text(self, url: str) -> str:
+        """A small public LectureTube file (captions) as text."""
+        if not url.startswith(CDN + "/"):
+            raise TuError("only cdn.video.tuwien.ac.at URLs are allowed")
+        r = await self.http.get(url)
+        if r.status_code != 200:
+            raise TuError(f"LectureTube CDN: HTTP {r.status_code}")
+        return r.content.decode("utf-8", errors="replace")
+
+    async def cdn_download(self, url: str, out: Path, max_bytes: int,
+                           progress: ByteProgress | None = None) -> int:
+        """Stream a public LectureTube file (video, captions) from the TU video CDN.
+
+        Needs no session, so it does not hold the session lock: other tools keep working
+        while a long video downloads."""
+        if not url.startswith(CDN + "/"):
+            raise TuError("only cdn.video.tuwien.ac.at URLs are allowed")
+        async with self.http.stream("GET", url) as r:
+            return await _save_stream(r, out, max_bytes, progress)
 
     async def ajax(self, method: str, args: dict):
         """Call a TUWEL (Moodle) web-service function that is enabled for AJAX."""

@@ -8,7 +8,7 @@ from tumcp import server
 from tumcp.client.auth import AuthError
 from tumcp.client.session import TuError
 
-WRITES_LOCAL_FILES = {"tuwel_download", "tuwel_sync_course"}
+WRITES_LOCAL_FILES = {"tuwel_download", "tuwel_sync_course", "tuwel_download_recording"}
 
 
 def _tools():

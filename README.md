@@ -7,6 +7,7 @@ TU Wien accounts: **TUWEL** (Moodle) and **TISS**. Ask things like
 - "Any new TISS messages or TUWEL notifications?"
 - "When is the exam for 194.023 and when does registration open?"
 - "Which courses about security are offered next semester?"
+- "Summarize yesterday's Programmierparadigmen lecture." (from the recording's captions)
 - "Download all slides of Verteilte Systeme." / "What's new in my courses since last week?"
 
 tumcp runs on your own computer: your MCP client (Claude Code, Claude Desktop, Codex, Cursor,
@@ -27,6 +28,8 @@ to run on a server. Your password never leaves your machine except to log in at 
 - **Course material:** every section, activity and file of a course (also tile and tab
   layouts), download single files or folders, or mirror a whole course to your disk and later
   fetch only what is new.
+- **Recorded lectures (LectureTube):** list the recordings of a course, read a lecture as
+  text with time marks (from its captions), download video and captions.
 - **Grades:** the grade report of a TUWEL course, the certificates in TISS.
 - **News:** TUWEL notifications (forum posts, grading) and TISS messages (announcements, exam
   reminders).
@@ -90,7 +93,7 @@ tumcp update            # runs `uv tool upgrade tumcp`
 ```
 
 Then restart your MCP clients. `tumcp --version` shows the installed version. A specific
-release installs with `uv tool install git+https://github.com/maximilian-sh/tumcp@v0.1.2`.
+release installs with `uv tool install git+https://github.com/maximilian-sh/tumcp@v0.1.3`.
 
 ## Tools
 
@@ -107,6 +110,9 @@ All tools only **read** from TU Wien. Times are Europe/Vienna.
 | `tuwel_grades` | the grade report of a course |
 | `tuwel_page` | plain text of one TUWEL page (assignment, quiz, forum thread) |
 | `tuwel_download` | saves a TUWEL file or folder into a local directory |
+| `tuwel_recordings` | LectureTube recordings of a course: title, date, duration |
+| `tuwel_transcript` | the spoken text of one recorded lecture, with time marks |
+| `tuwel_download_recording` | saves a recording as MP4 (slides and/or camera, 720p/1080p) plus captions |
 | `tuwel_sync_course` | mirrors all files of a course into `<download folder>/<course>/`, one folder per section |
 | `tiss_messages` | TISS messages: course announcements, exam reminders, certificates |
 | `tiss_search` | search the whole course catalogue by title, keyword or number |
@@ -181,7 +187,8 @@ Security keys*.
 ## Security and privacy
 
 - **Local only.** tumcp runs on your machine and talks to `tiss.tuwien.ac.at`,
-  `tuwel.tuwien.ac.at` and `idp.zid.tuwien.ac.at`, nothing else (`tumcp update` talks to GitHub
+  `tuwel.tuwien.ac.at`, `idp.zid.tuwien.ac.at` and `cdn.video.tuwien.ac.at` (LectureTube
+  videos and captions), nothing else (`tumcp update` talks to GitHub
   through uv). There is no hosted version, on purpose: it would have to hold other people's
   passwords and TOTP secrets.
 - **Credentials** live in the OS keychain (macOS Keychain, Windows Credential Locker, Secret
@@ -203,6 +210,8 @@ Security keys*.
   The download tools write only into your download folder or the folder a tool call names.
   Every tool carries MCP annotations: the reading tools are marked read-only, so your client
   may run them without asking; the two download tools are marked as writing (local files).
+- **Lecture recordings** are for you only. The LectureTube terms of use (§ 12) allow copies
+  only for personal use in the respective course; don't share or upload them anywhere.
 - **Your data goes to your model.** Whatever a tool returns (grades, messages, course pages) is
   sent to the model provider your MCP client uses.
 - **Course content is written by others.** Forum posts, messages and pages are text from other
@@ -232,7 +241,7 @@ Ideas, roughly in order. Pull requests welcome; open an issue first for bigger o
 - [ ] Quiz attempts and results
 - [ ] Read forum discussions of a course
 - [ ] "What's new since last time" across all courses (new files, posts, grades)
-- [ ] LectureTube/Opencast recordings of a course
+- [ ] What is streaming live right now (LectureTube Live)
 - [ ] Ready-made prompts, e.g. a weekly overview
 
 **Changing things (needs a new, opt-in design)**
@@ -254,10 +263,20 @@ or timing tricks around registration windows.
 - [x] Tool annotations (read-only, titles), real tool errors, parameter limits, progress
 - [x] CI on Linux, macOS and Windows
 - [x] Search the TISS course catalogue (`tiss_search`)
+- [x] LectureTube recordings: list, transcript, download (`tuwel_recordings`, …)
 - [ ] Publish on PyPI (`uvx tumcp`) and in the official MCP Registry
 - [ ] One-click bundle for Claude Desktop (`.mcpb`)
 - [ ] Typed output schemas for all tools
 - [ ] Parser tests for TISS pages and the grade report
+
+## Related projects
+
+- [TuAutoLogin](https://github.com/maximilian-sh/TuAutoLogin): userscript that logs you into
+  TU Wien in the browser, TOTP included
+- [TuVideoDownloader](https://github.com/maximilian-sh/TuVideoDownloader): download buttons
+  for LectureTube recordings in TUWEL
+- [TuKodi](https://github.com/maximilian-sh/TuKodi): watch LectureTube Live and recordings in
+  Kodi
 
 ## Contributing
 
