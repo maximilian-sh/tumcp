@@ -233,7 +233,7 @@ async def tiss_course(
 
 @mcp.tool(annotations=_read("TISS certificates"))
 async def tiss_certificates() -> list[dict]:
-    """Issued certificates (Zeugnisse): course, ECTS, date, grade, examiner."""
+    """Issued certificates: course, ECTS, date, grade, examiner."""
     return await _safe(tiss.certificates(client()))
 
 

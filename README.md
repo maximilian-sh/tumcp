@@ -27,7 +27,7 @@ to run on a server. Your password never leaves your machine except to log in at 
 - **Course material:** every section, activity and file of a course (also tile and tab
   layouts), download single files or folders, or mirror a whole course to your disk and later
   fetch only what is new.
-- **Grades:** the grade report of a TUWEL course, the certificates (Zeugnisse) in TISS.
+- **Grades:** the grade report of a TUWEL course, the certificates in TISS.
 - **News:** TUWEL notifications (forum posts, grading) and TISS messages (announcements, exam
   reminders).
 - **TISS course info:** search the whole course catalogue; dates, exams and their
@@ -222,7 +222,7 @@ Ideas, roughly in order. Pull requests welcome; open an issue first for bigger o
 
 - [ ] Study progress: curriculum, modules, ECTS done and missing (TISS)
 - [ ] Your registrations: courses, groups and exams you are registered for, with status
-- [ ] Submission state per assignment and the Kreuzerl (checkmark) you ticked, via the
+- [ ] Submission state per assignment and the checkmark exercises you ticked, via the
       TUWEL app interface instead of reading pages
 - [ ] Quiz attempts and results
 - [ ] Read forum discussions of a course
@@ -232,7 +232,7 @@ Ideas, roughly in order. Pull requests welcome; open an issue first for bigger o
 
 **Changing things (needs a new, opt-in design)**
 
-- [ ] Tick Kreuzerl (checkmark exercises)
+- [ ] Tick checkmark exercises
 - [ ] Upload a solution to an assignment (as a draft; submitting for grading stays a separate,
       explicit step)
 - [ ] Add or remove TISS favourites
