@@ -11,6 +11,7 @@ import json
 import shutil
 import subprocess
 import sys
+import typing
 from pathlib import Path
 
 from . import __version__, clients, config
@@ -146,17 +147,22 @@ def _tool_funcs() -> dict:
 def _tools() -> int:
     for name, fn in _tool_funcs().items():
         doc = " ".join((fn.__doc__ or "").split())
-        print(f"{name}{inspect.signature(fn)}\n    {doc}")
+        args = ", ".join(f"{p.name}={p.default!r}" if p.default is not p.empty else p.name
+                         for p in inspect.signature(fn).parameters.values() if p.name != "ctx")
+        print(f"{name}({args})\n    {doc}")
     return 0
 
 
 def _call(name: str, pairs: list[str]) -> int:
+    from mcp.server.mcpserver.exceptions import ToolError
+
     funcs = _tool_funcs()
     if name not in funcs:
         print(f"Unknown tool {name!r}. See `tumcp tools`.", file=sys.stderr)
         return 2
     fn = funcs[name]
-    params = inspect.signature(fn).parameters
+    hints = typing.get_type_hints(fn)                     # Annotated[int, ...] -> int
+    params = {k: v for k, v in inspect.signature(fn).parameters.items() if k != "ctx"}
     kwargs = {}
     for pair in pairs:
         key, sep, raw = pair.partition("=")
@@ -164,10 +170,10 @@ def _call(name: str, pairs: list[str]) -> int:
             print(f"Bad argument {pair!r}, expected one of: {', '.join(params)}",
                   file=sys.stderr)
             return 2
-        kind = params[key].annotation
-        if kind in ("int", int):
+        kind = hints.get(key)
+        if kind is int:
             kwargs[key] = int(raw)
-        elif kind in ("bool", bool):
+        elif kind is bool:
             kwargs[key] = raw.lower() in ("1", "true", "yes")
         else:
             kwargs[key] = raw
@@ -176,6 +182,8 @@ def _call(name: str, pairs: list[str]) -> int:
         from . import server
         try:
             return await fn(**kwargs)
+        except ToolError as exc:
+            return {"error": str(exc)}
         finally:
             if server._client is not None:
                 await server._client.aclose()

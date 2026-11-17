@@ -16,14 +16,31 @@ to run on a server. Your password never leaves your machine except to log in at 
 > same app interface your browser and the Moodle app use, and can break whenever TISS or TUWEL
 > change. Use it at your own risk and within TU Wien's IT terms of use.
 
-> **Status: early.** It works and is used daily, but it is young. Tested on macOS; Linux and
-> Windows should work but are not tested yet; reports welcome.
+> **Status: early.** It works and is used daily, but it is young. Used on macOS; the tests
+> also run on Linux and Windows, but nobody has used it there yet. Reports welcome.
 
 **Kurz auf Deutsch:** tumcp gibt deinem KI-Assistenten Lesezugriff auf TUWEL und TISS
 (Abgaben, Termine, Noten, Nachrichten, Kursunterlagen herunterladen). Es läuft lokal auf deinem
 Rechner, die Zugangsdaten liegen im Schlüsselbund deines Betriebssystems. Installation: die zwei
 Befehle unter *Quick start*, `tumcp setup` führt durch den Rest. Es kann nichts abgeben, anmelden
 oder posten.
+
+## What it can do
+
+- **Deadlines and to-dos:** what is due in TUWEL, whether it is already submitted, quiz
+  windows, the full TUWEL calendar.
+- **Course material:** every section, activity and file of a course (also tile and tab
+  layouts), download single files or folders, or mirror a whole course to your disk and later
+  fetch only what is new.
+- **Grades:** the grade report of a TUWEL course, the certificates (Zeugnisse) in TISS.
+- **News:** TUWEL notifications (forum posts, grading) and TISS messages (announcements, exam
+  reminders).
+- **TISS course info:** dates, exams and their registration windows, course and group
+  registration, cancelled courses, your favourites with registration state.
+- **Any TUWEL page as text,** e.g. an assignment or quiz page to check its state.
+
+It can **not** submit, register, tick, post or change anything at TU Wien; see the
+[roadmap](#roadmap) for that.
 
 ## Quick start
 
@@ -182,6 +199,8 @@ Sicherheitsschlüssel*.
 - **Read-only towards TU Wien.** No tool submits, registers, posts or changes anything there.
   `tuwel_page` refuses URLs that could change state (anything carrying a `sesskey`, logout).
   The download tools write only into your download folder or the folder a tool call names.
+  Every tool carries MCP annotations: the reading tools are marked read-only, so your client
+  may run them without asking; the two download tools are marked as writing (local files).
 - **Your data goes to your model.** Whatever a tool returns (grades, messages, course pages) is
   sent to the model provider your MCP client uses.
 - **Course content is written by others.** Forum posts, messages and pages are text from other
@@ -198,6 +217,46 @@ TISS and TUWEL are shared infrastructure. tumcp only makes requests when a tool 
 never polls in the background; `tuwel_sync_course` downloads only what changed. Please don't
 wrap it in a loop or a cron job that hammers TU servers.
 
+## Roadmap
+
+Ideas, roughly in order. Pull requests welcome; open an issue first for bigger ones.
+
+**Reading (fits the current design)**
+
+- [ ] Search the TISS course catalogue (Vorlesungsverzeichnis) by name or number
+- [ ] Study progress: curriculum, modules, ECTS done and missing (TISS)
+- [ ] Your registrations: courses, groups and exams you are registered for, with status
+- [ ] Submission state per assignment and the Kreuzerl (checkmark) you ticked, via the
+      TUWEL app interface instead of reading pages
+- [ ] Quiz attempts and results
+- [ ] Read forum discussions of a course
+- [ ] "What's new since last time" across all courses (new files, posts, grades)
+- [ ] LectureTube/Opencast recordings of a course
+- [ ] Ready-made prompts, e.g. a weekly overview
+
+**Changing things (needs a new, opt-in design)**
+
+- [ ] Tick Kreuzerl (checkmark exercises)
+- [ ] Upload a solution to an assignment (as a draft; submitting for grading stays a separate,
+      explicit step)
+- [ ] Add or remove TISS favourites
+- [ ] Register for courses, groups and exams
+
+These would break the "read-only" promise, so they will only come with: separate tools that
+are off unless you turn them on in `tumcp setup`, marked as changing data so your client always
+asks before running them, a preview of exactly what will happen, and never automatic retries
+or timing tricks around registration windows.
+
+**Project**
+
+- [x] Install from GitHub, `tumcp setup`, `tumcp update`
+- [x] Tool annotations (read-only, titles), real tool errors, parameter limits, progress
+- [x] CI on Linux, macOS and Windows
+- [ ] Publish on PyPI (`uvx tumcp`) and in the official MCP Registry
+- [ ] One-click bundle for Claude Desktop (`.mcpb`)
+- [ ] Typed output schemas for all tools
+- [ ] Parser tests for TISS pages and the grade report
+
 ## Contributing
 
 Issues and pull requests are welcome, especially parser fixes when TISS or TUWEL change, and
@@ -208,7 +267,7 @@ src/tumcp/client/    login, session, TUWEL and TISS read functions, downloads (n
 src/tumcp/server.py  thin MCP layer (stdio)
 src/tumcp/cli.py     tumcp / setup / login / logout / status / update / tools / call
 src/tumcp/clients.py registering with MCP clients (setup)
-tests/               pytest, synthetic data only
+tests/               pytest, synthetic data only (CI runs them on Linux, macOS, Windows)
 ```
 
 ```bash

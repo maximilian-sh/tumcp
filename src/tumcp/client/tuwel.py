@@ -18,6 +18,7 @@ from __future__ import annotations
 import html
 import re
 import time
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
@@ -337,19 +338,26 @@ def sync_plan(sections: list[dict]) -> list[dict]:
                     add([sdir], own, f["path"], f)
     for sdir, sec in zip(dirs, sections, strict=True):
         texts = [(m.get("description"), m.get("name")) for m in sec.get("modules") or []]
-        for html, owner in [*texts, (sec.get("summary"), None)]:
-            for f in files.file_links(html):
+        for text, owner in [*texts, (sec.get("summary"), None)]:
+            for f in files.file_links(text):
                 add([sdir], [sdir, owner], safe_name(f["name"]), f)
     return plan
 
 
-async def _fetch(tu: TuClient, plan: list[dict], root: Path, overwrite: bool) -> dict:
-    """Download what the plan lists into `root`, skipping what is already up to date."""
+Progress = Callable[[int, int, str], Awaitable[None]]
+
+
+async def _fetch(tu: TuClient, plan: list[dict], root: Path, overwrite: bool,
+                 progress: Progress | None = None) -> dict:
+    """Download what the plan lists into `root`, skipping what is already up to date.
+    `progress(done, total, path)` is awaited after every file."""
     folder = files.Folder(root)
     result: dict = {"folder": str(root), "new": [], "updated": [], "unchanged": 0,
                     "kept_local_changes": [], "failed": []}
     try:
-        for item in plan:
+        for done, item in enumerate(plan, 1):
+            if progress is not None:
+                await progress(done, len(plan), item["path"])
             state = folder.plan(item["path"], item["size"], item["modified"], overwrite)
             if state is None:
                 result["unchanged"] += 1
@@ -373,13 +381,14 @@ async def _fetch(tu: TuClient, plan: list[dict], root: Path, overwrite: bool) ->
     return {k: v for k, v in result.items() if v or k in ("folder", "unchanged")}
 
 
-async def sync_course(tu: TuClient, course_id: int, dest: str, overwrite: bool = False) -> dict:
+async def sync_course(tu: TuClient, course_id: int, dest: str, overwrite: bool = False,
+                      progress: Progress | None = None) -> dict:
     """Mirror every file of a course into `dest`/<course>/. Only new or changed files are
     downloaded; files changed locally are kept unless `overwrite` is set."""
     cid = int(course_id)
     title, sections = await _course(tu, cid)
     root = Path(dest).expanduser() / course_folder(title, cid)
-    return {"course": title, **await _fetch(tu, sync_plan(sections), root, overwrite)}
+    return {"course": title, **await _fetch(tu, sync_plan(sections), root, overwrite, progress)}
 
 
 async def download(tu: TuClient, url: str, dest: str, overwrite: bool = False) -> dict:
