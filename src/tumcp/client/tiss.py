@@ -2,15 +2,20 @@
 
 Each query is a fetch (`async def x(tu, ...)`, needs a logged-in TuClient) plus a
 pure parser (`parse_x(html)`), so the parsers can be tested against fixtures.
+
+Course search, exam dates and the staff directory come from TISS's public REST API
+(/api/..., documented at /api/dokumentation), the rest from the pages a student sees.
 """
 from __future__ import annotations
 
+import html
 import re
+import xml.etree.ElementTree as ET
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from . import dom
-from .session import TISS, TuClient
+from .session import TISS, TuClient, TuError
 
 TZ = ZoneInfo("Europe/Vienna")
 DATE_RE = re.compile(r"(\d{2})\.(\d{2})\.(\d{4})\s+(\d{1,2}):(\d{2})")
@@ -206,10 +211,46 @@ def parse_search(data: dict, offset: int = 0, query: str = "") -> dict:
 
 # ------------------------------------------------------------------- course
 async def course(tu: TuClient, course_nr: str, semester: str | None = None) -> dict:
-    """Course details: the planning-relevant sections (dates, exams, registration, groups)."""
+    """Course details: the planning-relevant sections (dates, exams, registration, groups)
+    plus the upcoming exam dates with their registration deadlines."""
     nr, sem = normalize_course_nr(course_nr), normalize_semester(semester)
-    html = await tu.tiss_get(f"{TISS}/course/educationDetails.xhtml?semester={sem}&courseNr={nr}")
-    return parse_course(html, nr, sem)
+    page = await tu.tiss_get(f"{TISS}/course/educationDetails.xhtml?semester={sem}&courseNr={nr}")
+    result = parse_course(page, nr, sem)
+    try:
+        result["upcoming_exams"] = await exam_dates(tu, nr)
+    except TuError as exc:                    # the page above is the main answer
+        result["upcoming_exams_error"] = str(exc)
+    return result
+
+
+async def exam_dates(tu: TuClient, course_nr: str) -> list[dict]:
+    """Future exams of a course (any semester) from the public API, with deadlines."""
+    found = await tu.tiss_api(f"course/{normalize_course_nr(course_nr)}/examDates", xml=True)
+    return parse_exam_dates(found) if found else []
+
+
+def _local(stamp: str | None) -> str | None:
+    """'2027-01-29T15:00:00.000+01:00' -> '2027-01-29 15:00' (Vienna time)."""
+    if not stamp:
+        return None
+    return datetime.fromisoformat(stamp).astimezone(TZ).strftime("%Y-%m-%d %H:%M")
+
+
+def parse_exam_dates(text: str) -> list[dict]:
+    """<exam id><title>Test 1  (2026-11-23)</title><examinationBegin/><applicationEnd/>
+    <deregistrationEnd/></exam>, namespaced; the title repeats the date in brackets."""
+    out = []
+    for exam in ET.fromstring(text):
+        if not exam.tag.endswith("exam"):
+            continue
+        field = {child.tag.rsplit("}", 1)[-1]: (child.text or "").strip() for child in exam}
+        out.append({
+            "title": re.sub(r"\s*\(\d{4}-\d{2}-\d{2}\)\s*$", "", field.get("title", "")) or None,
+            "date": _local(field.get("examinationBegin")),
+            "registration_until": _local(field.get("applicationEnd")),
+            "deregistration_until": _local(field.get("deregistrationEnd")),
+        })
+    return sorted(out, key=lambda e: e["date"] or "")
 
 
 def page_cancelled(html: str) -> bool:
@@ -267,3 +308,55 @@ def parse_certificates(html: str) -> list[dict]:
                         "ects": row.get("ECTS"), "date": row.get("Prüfungsdatum"),
                         "grade": row.get("Note"), "examiner": row.get("Prüfer_in")})
     return out
+
+
+# ------------------------------------------------------------------- people
+async def people(tu: TuClient, query: str, limit: int = 5) -> list[dict]:
+    """Staff directory search: contact data, rooms and consultation hours."""
+    query = query.strip()
+    if len(query) < 2:
+        raise ValueError("search for a name, at least 2 characters")
+    found = await tu.tiss_api("person/v23/psuche", q=query, max_treffer=max(1, min(int(limit), 20)))
+    return parse_people(found or {}, query)
+
+
+def _units(person: dict) -> list[dict]:
+    out = []
+    for job in person.get("employee") or []:
+        org = job.get("org_ref") or {}
+        room = job.get("room") or {}
+        addr = room.get("address") or {}
+        place = ", ".join(p for p in (addr.get("street"),
+                                      " ".join(filter(None, (addr.get("zip_code"),
+                                                             addr.get("city"))))) if p)
+        out.append({"unit": org.get("name_en") or org.get("name_de"), "code": org.get("code"),
+                    "function": job.get("display_function"),
+                    "room": " ".join(filter(None, (room.get("room_code"),
+                                                   f"({place})" if place else None))) or None})
+    return out
+
+
+def parse_people(data: dict, query: str = "") -> list[dict]:
+    """Results of /api/person/v23/psuche. Only staff (people with a position at TU Wien):
+    tumcp is not a tool for looking up students."""
+    out = []
+    for p in data.get("results") or []:
+        if not p.get("employee"):
+            continue
+        hours = [dom.strip_html(html.unescape(h)) for h in p.get("consultation_hours") or []]
+        if p.get("consultation_hour_info"):
+            hours.append(dom.strip_html(html.unescape(p["consultation_hour_info"])))
+        out.append({
+            "name": " ".join(filter(None, (p.get("preceding_titles"), p.get("first_name"),
+                                           p.get("last_name"), p.get("postpositioned_titles")))),
+            "email": p.get("main_email"),
+            "other_emails": p.get("other_emails") or None,
+            "phone": p.get("main_phone_number"),
+            "consultation_hours": [h for h in hours if h] or None,
+            "positions": _units(p),
+            "url": f"{TISS}{p['card_uri']}" if p.get("card_uri") else None,
+            "_last": (p.get("last_name") or "").lower(),
+        })
+    q = query.strip().lower()
+    out.sort(key=lambda x: not (q and (x["_last"] == q or q in x["name"].lower())))
+    return [{k: v for k, v in x.items() if k != "_last" and v is not None} for x in out]

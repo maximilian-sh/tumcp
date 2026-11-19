@@ -228,10 +228,19 @@ class TuClient:
                 raise TuError("TISS returned an empty client-window shell")
             return r.text
 
-    async def tiss_api(self, path: str, **params) -> dict:
-        """GET from TISS's public REST API (/api/...), which needs no login."""
+    async def tiss_api(self, path: str, *, xml: bool = False, **params):
+        """GET from TISS's public REST API (/api/...), which needs no login. Returns the
+        parsed JSON, or with `xml` the XML text (some endpoints only speak XML); None if
+        TISS answers 404 (nothing found)."""
         r = await self.http.get(f"{TISS}/api/{path}", params=params,
-                                headers={"Accept": "application/json"})
+                                headers={"Accept": "application/xml" if xml
+                                         else "application/json"})
+        if r.status_code == 404:
+            return None
+        if xml:
+            if r.status_code != 200:
+                raise TuError(f"TISS API answered with HTTP {r.status_code}")
+            return r.text
         try:
             data = r.json()
         except ValueError:

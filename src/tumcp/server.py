@@ -32,7 +32,8 @@ course system). Use it to check deadlines and whether something is already submi
 files to disk with tuwel_download or a whole course with tuwel_sync_course), recorded
 lectures (tuwel_recordings, tuwel_transcript, tuwel_download_recording), grades
 (tuwel_grades, tiss_certificates), announcements (tiss_messages, tuwel_notifications) and
-course/exam/registration details (tiss_favorites, tiss_course; any course: tiss_search).
+course/exam/registration details (tiss_favorites, tiss_course; any course: tiss_search) and
+lecturers' contact data (tiss_person).
 Times are Europe/Vienna.
 These tools cannot submit, register or change anything at TU Wien."""
 
@@ -279,9 +280,21 @@ async def tiss_course(
                                        description="Like '2026W' or '2027S'. Empty: the "
                                                    "current semester.")] = "",
 ) -> dict:
-    """TISS course details as text: dates, exams with registration windows, course and
-    group registration info, and whether the course is cancelled."""
+    """TISS course details: dates, exam mode, course and group registration, whether it is
+    cancelled, and `upcoming_exams` (every future exam date with registration and
+    deregistration deadlines)."""
     return await _safe(tiss.course(client(), course_nr, semester or None))
+
+
+@mcp.tool(annotations=_read("TU Wien staff directory"))
+async def tiss_person(
+        name: Annotated[str, Field(min_length=2, description="Name of a lecturer or other "
+                                                             "TU Wien staff member.")],
+        limit: Annotated[int, Field(ge=1, le=20, description="At most this many.")] = 5,
+) -> list[dict]:
+    """Find TU Wien staff (lecturers, tutors, institute staff) in the TISS address book:
+    email, phone, institute, room and consultation hours. Students are not listed."""
+    return await _safe(tiss.people(client(), name, limit))
 
 
 @mcp.tool(annotations=_read("TISS certificates"))

@@ -5,7 +5,8 @@ TU Wien accounts: **TUWEL** (Moodle) and **TISS**. Ask things like
 
 - "What is due this week, and have I already submitted it?"
 - "Any new TISS messages or TUWEL notifications?"
-- "When is the exam for 194.023 and when does registration open?"
+- "When is the exam for 194.023 and until when can I register?"
+- "When are the consultation hours of my Programmierparadigmen lecturer?"
 - "Which courses about security are offered next semester?"
 - "Summarize yesterday's Programmierparadigmen lecture." (from the recording's captions)
 - "Download all slides of Verteilte Systeme." / "What's new in my courses since last week?"
@@ -33,9 +34,11 @@ to run on a server. Your password never leaves your machine except to log in at 
 - **Grades:** the grade report of a TUWEL course, the certificates in TISS.
 - **News:** TUWEL notifications (forum posts, grading) and TISS messages (announcements, exam
   reminders).
-- **TISS course info:** search the whole course catalogue; dates, exams and their
-  registration windows, course and group registration, cancelled courses; your favourites
-  with registration state.
+- **TISS course info:** search the whole course catalogue; dates, every upcoming exam with
+  its registration and deregistration deadline, course and group registration, cancelled
+  courses; your favourites with registration state.
+- **Lecturers:** email, phone, institute, room and consultation hours from the TU address
+  book.
 - **Any TUWEL page as text,** e.g. an assignment or quiz page to check its state.
 
 It can **not** submit, register, tick, post or change anything at TU Wien; see the
@@ -93,7 +96,7 @@ tumcp update            # runs `uv tool upgrade tumcp`
 ```
 
 Then restart your MCP clients. `tumcp --version` shows the installed version. A specific
-release installs with `uv tool install git+https://github.com/maximilian-sh/tumcp@v0.1.3`.
+release installs with `uv tool install git+https://github.com/maximilian-sh/tumcp@v0.1.4`.
 
 ## Tools
 
@@ -117,7 +120,8 @@ All tools only **read** from TU Wien. Times are Europe/Vienna.
 | `tiss_messages` | TISS messages: course announcements, exam reminders, certificates |
 | `tiss_search` | search the whole course catalogue by title, keyword or number |
 | `tiss_favorites` | favourite courses by section, with registration state |
-| `tiss_course` | course details: dates, exams, registration windows, groups |
+| `tiss_course` | course details: dates, registration, groups, upcoming exams with deadlines |
+| `tiss_person` | lecturers and other staff: email, phone, room, consultation hours |
 | `tiss_certificates` | issued certificates with grade and date |
 
 ### Downloading course files
@@ -264,6 +268,7 @@ or timing tricks around registration windows.
 - [x] CI on Linux, macOS and Windows
 - [x] Search the TISS course catalogue (`tiss_search`)
 - [x] LectureTube recordings: list, transcript, download (`tuwel_recordings`, …)
+- [x] Exam dates with deadlines for any course, staff directory (`tiss_person`)
 - [ ] Publish on PyPI (`uvx tumcp`) and in the official MCP Registry
 - [ ] One-click bundle for Claude Desktop (`.mcpb`)
 - [ ] Typed output schemas for all tools
