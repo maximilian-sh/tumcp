@@ -96,7 +96,7 @@ tumcp update            # runs `uv tool upgrade tumcp`
 ```
 
 Then restart your MCP clients. `tumcp --version` shows the installed version. A specific
-release installs with `uv tool install git+https://github.com/maximilian-sh/tumcp@v0.1.4`.
+release installs with `uv tool install git+https://github.com/maximilian-sh/tumcp@v0.1.5`.
 
 ## Tools
 

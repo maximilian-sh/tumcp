@@ -257,7 +257,12 @@ class TuClient:
         for _ in range(8):
             if str(r.url).startswith(TUWEL) and '"sesskey":"' in r.text:
                 break
-            nxt = await auth.post_saml(self.http, r)
+            try:
+                nxt = await auth.post_saml(self.http, r)
+            except httpx2.UnsupportedProtocol:
+                # Moodle went on to a remembered launch.php, which redirects to
+                # moodlemobile://: the login itself has worked
+                nxt = await self.http.get(f"{TUWEL}/my/")
             if nxt is None:
                 raise TuError(f"TUWEL login stuck at {str(r.url).split('?')[0]}")
             r = nxt
@@ -265,6 +270,14 @@ class TuClient:
         if not self._sesskey:
             raise TuError("TUWEL login: no sesskey")
         await asyncio.to_thread(self._save_locked)
+
+    async def _ensure_tuwel(self) -> None:
+        """Log in to TUWEL unless the session is still valid (held with self._lock)."""
+        r = await self.http.get(f"{TUWEL}/my/")
+        if "/login/" in str(r.url) or auth.IDP_HOST in str(r.url):
+            await self._tuwel_login()
+        else:
+            self._remember(r.text)
 
     def _save_locked(self) -> None:
         with self._flock:
@@ -295,18 +308,17 @@ class TuClient:
         """Get a web-service token the way the Moodle app does: with the browser session,
         launch.php redirects to moodlemobile://token=<base64 "md5(wwwroot+passport):::token">.
         TUWEL reuses the token it already issued for the app; the user can revoke it under
-        Preferences > Security keys."""
+        Preferences > Security keys.
+
+        Only ever open launch.php with a valid TUWEL session: without one, Moodle remembers
+        it as the page to return to after the login, which then ends at moodlemobile://."""
+        await self._ensure_tuwel()
         passport = secrets.token_hex(8)
-        for attempt in (1, 2):
-            r = await self.http.get(f"{TUWEL}/admin/tool/mobile/launch.php", params={
-                "service": "moodle_mobile_app", "passport": passport, "urlscheme": "moodlemobile"},
-                follow_redirects=False)
-            location = r.headers.get("location", "")
-            if location.startswith("moodlemobile://token="):
-                break
-            if attempt == 1:
-                await self._tuwel_login()
-        else:
+        r = await self.http.get(f"{TUWEL}/admin/tool/mobile/launch.php", params={
+            "service": "moodle_mobile_app", "passport": passport, "urlscheme": "moodlemobile"},
+            follow_redirects=False)
+        location = r.headers.get("location", "")
+        if not location.startswith("moodlemobile://token="):
             raise TuError("TUWEL handed out no app token (is the Moodle app access disabled?)")
         payload = base64.b64decode(location.split("token=", 1)[1]).decode()
         signature, token, *_ = payload.split(":::")
@@ -395,11 +407,7 @@ class TuClient:
         async with self._lock:
             for attempt in (1, 2):
                 if self._sesskey is None:
-                    r = await self.http.get(f"{TUWEL}/my/")
-                    if "/login/" in str(r.url) or auth.IDP_HOST in str(r.url):
-                        await self._tuwel_login()
-                    else:
-                        self._remember(r.text)
+                    await self._ensure_tuwel()
                 r = await self.http.post(
                     f"{TUWEL}/lib/ajax/service.php?sesskey={self._sesskey}&info={method}",
                     json=[{"index": 0, "methodname": method, "args": args}])
